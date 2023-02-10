@@ -1,8 +1,10 @@
-# third party
+# stdlib
 import sys
-import pytest
+
+# third party
 from demo_data import load_adult_data
 import numpy as np
+import pytest
 from sklearn import preprocessing
 import torch
 import torch.nn as nn
@@ -12,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 
 # data_iq absolute
 from data_iq.dataiq_class import DataIQ_Torch
+from data_iq.dataiq_torch import DataIQTorch
 
 
 class TrainData(Dataset):
@@ -66,9 +69,8 @@ LEARNING_RATE = 0.01
 EPOCHS = 10
 
 
-@pytest.mark.skipif(sys.platform == "darwin", reason="libomp crash on OSX")
+# @pytest.mark.skipif(sys.platform == "darwin", reason="libomp crash on OSX")
 def test_torch_example() -> None:
-
     train_data = TrainData(torch.FloatTensor(X_train), torch.FloatTensor(y_train))
     train_loader = DataLoader(dataset=train_data, batch_size=BATCH_SIZE, shuffle=True)
 
@@ -84,6 +86,7 @@ def test_torch_example() -> None:
     optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
     dataiq = DataIQ_Torch(X=X_train, y=y_train, sparse_labels=True)
+    dataiq_new = DataIQTorch(n_samples=len(train_loader.dataset))
 
     for e in range(1, EPOCHS + 1):
         net.train()
@@ -108,6 +111,8 @@ def test_torch_example() -> None:
             epoch_loss += loss.item()
             epoch_acc += (predicted == y_batch).sum().item() / len(y_batch)
 
+            dataiq_new.on_batch_end(y_true=y_batch, y_pred=y_pred)
+
         print(
             f"Epoch {e+0:03}: | Loss: {epoch_loss/len(train_loader):.5f} | Acc: {epoch_acc/len(train_loader):.3f}",
         )
@@ -117,5 +122,11 @@ def test_torch_example() -> None:
     aleatoric_uncertainty = dataiq.aleatoric
     confidence = dataiq.confidence
 
+    aleatoric_uncertainty_new = dataiq_new.aleatoric_uncertainty()
+
     assert len(aleatoric_uncertainty) == len(X_train)
     assert len(confidence) == len(X_train)
+
+
+if __name__ == "__main__":
+    test_torch_example()
