@@ -3,73 +3,57 @@ from typing import Union
 
 # third party
 import numpy as np
-from pydantic import BaseModel, Field
 import torch
 
+# data_iq absolute
+from data_iq.metrics import METRICS, set_metrics_as_properties
+from data_iq.numpy_helpers import convert_to_numpy, get_ground_truth_probs, onehot2int
+
 """
-Questions:
-Are the _true_probabilities (now `predicted_label_probabilities`) used for anything?
-Is there a need to store them? 
-
-Is the `detach` causing errors during training?
+TODO:
+- Add support for shuffled data
+    This can be done by having the dataset return the index of the sample
+    and passing this to class. The insertion of the probabilities then needs
+    to be done using the index (make sure to return from dataloader).
 """
-
-
-class EpochProbabilities(BaseModel):
-    """Dataclass to store the probabilities of the ground truth label and the
-    predicted label for each sample for multiple epochs.
-    """
-
-    ground_truth_probabilities: np.ndarray = Field(
-        description="""Probability of the ground truth label for each sample. 
-        np.ndarray of shape (n_samples, n_epochs)""",
-    )
-    predicted_label_probabilities: np.ndarray = Field(
-        description="""Probability of the predicted label for each sample. 
-        np.adarray of shape (n_samples, n_epochs)""",
-    )
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
-class BatchProbabilities(BaseModel):
-    """Dataclass to store the probabilities of the ground truth label and the
-    predicted label for each sample for a single epoch."""
-
-    ground_truth_probabilities: np.ndarray = Field(
-        description="""Probability of the ground truth label for each sample. 
-        np.ndarray of shape (n_samples,)""",
-    )
-    predicted_label_probabilities: np.ndarray = Field(
-        description="""Probability of the predicted label for each sample. 
-        np.ndarray of shape (n_samples,)""",
-    )
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class DataIQTorch:
+    """Class for calculating the aleatoric uncertainty for models outputting
+    probabilities over epochs.
+
+    Attributes:
+        n_samples (int): Number of samples (rows) in the dataset. Needs to be
+            set at initialization to handle batching correctly.
+        label_probs (np.ndarray): Probability of the ground truth label for
+            each sample. np.ndarray of shape (n_samples, n_epochs)
+    """
+
     def __init__(self, n_samples: int):
         self.n_samples = n_samples
-        self.current_sample_idx = 0
+        self._current_sample_idx = 0
 
-        self.probs = None
-        self._epoch_probs = BatchProbabilities(
-            ground_truth_probabilities=np.zeros(n_samples),
-            predicted_label_probabilities=np.zeros(n_samples),
-        )
+        self.label_probs = None  # placeholder
+        self._epoch_label_probs = np.zeros(n_samples)
+
+        self._set_metrics_as_properties()
+
+    @classmethod
+    def _set_metrics_as_properties(cls) -> None:
+        """Set the metrics as properties of the class. This allows the metrics
+        to be accessed as attributes of the class."""
+        set_metrics_as_properties(cls, label_probs_name="label_probs")
 
     def on_batch_end(
         self,
         y_true: Union[np.ndarray, torch.Tensor],
         y_pred: Union[np.ndarray, torch.Tensor],
     ) -> None:
-        """Add the probabilities of the ground truth label and the predicted
-        label for each sample. For each batch in an epoch, the probabilities
-        are added to the _epoch_probs attribute. At the end of the epoch, the
-        probabilities are added to the probs attribute.
+        """Add the probabilities of the ground truth label for each sample.
+        For each batch in an epoch, the probabilities are added to the
+        _epoch_label_probs attribute. At the end of the epoch, the
+        probabilities are added to the label_probs attribute. Note, samples must
+        be input in the same order for each epoch (i.e. no shuffling).
 
         Args:
             y_true (np.ndarray): Ground truth labels. np.ndarray of shape
@@ -79,103 +63,50 @@ class DataIQTorch:
         """
         batch_size = y_true.shape[0]
 
-        y_true, y_pred = self._convert_to_numpy(y_true), self._convert_to_numpy(y_pred)
+        y_true, y_pred = convert_to_numpy(y_true), convert_to_numpy(y_pred)
+
+        # convert labels to int if one-hot encoded
+        y_true = onehot2int(array=y_true)
+
         # get the probabilities of the ground truth label
-        ground_truth_probs = self._get_ground_truth_probs(y_true=y_true, y_pred=y_pred)
+        ground_truth_probs = get_ground_truth_probs(y_true=y_true, y_pred=y_pred)
 
-        # get the probabilities of the predicted label
-        predicted_label_probs = self._get_predicted_label_probs(y_pred=y_pred)
-
-        # add the probabilities to the _epoch_probs attribute for the current batch
-        self._epoch_probs.ground_truth_probabilities[
-            self.current_sample_idx : self.current_sample_idx + batch_size
+        # add the probabilities to the _epoch_label_probs attribute for the
+        # current batch
+        self._epoch_label_probs[
+            self._current_sample_idx : self._current_sample_idx + batch_size
         ] = ground_truth_probs
-        self._epoch_probs.predicted_label_probabilities[
-            self.current_sample_idx : self.current_sample_idx + batch_size
-        ] = predicted_label_probs
 
         # update the current sample index
-        self.current_sample_idx += batch_size
+        self._current_sample_idx += batch_size
         # if the current sample index is equal to the number of samples, then
-        # the epoch is over and the probabilities for the epoch are added to the
-        # probs attribute
-        if self.current_sample_idx == self.n_samples:
+        # the epoch is over and the probabilities for the epoch are added to
+        # the probs attribute
+        if self._current_sample_idx == self.n_samples:
             self._add_epoch_probs()
-            self.current_sample_idx = 0
-
-    def _get_ground_truth_probs(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-    ) -> np.ndarray:
-        """Get the probabilities of the ground truth label for each sample in the batch.
-
-        Args:
-            y_true (np.ndarray): Ground truth labels. np.ndarray of shape (batch_size,)
-            y_pred (np.ndarray): Predicted labels. np.ndarray of shape (batch_size, n_classes)
-
-        Returns:
-            np.ndarray: Probabilities of the ground truth label for each sample.
-            np.ndarray of shape (batch_size,)
-        """
-        return y_pred[np.arange(y_pred.shape[0]), y_true]
-
-    def _get_predicted_label_probs(self, y_pred: np.ndarray) -> np.ndarray:
-        """Get the probabilities of the predicted label for each sample in the
-        batch.
-
-        Args:
-            y_pred (np.ndarray): Predicted labels. np.ndarray of shape
-                (batch_size, n_classes)
-
-        Returns:
-            np.ndarray: Probabilities of the predicted label for each sample.
-            np.ndarray of shape (batch_size,)
-        """
-        return np.max(y_pred, axis=1)
+            self._current_sample_idx = 0
 
     def _add_epoch_probs(self) -> None:
         """Add the probabilities for the current epoch to the probs attribute."""
-        if self.probs is None:
-            self.probs = EpochProbabilities(
-                ground_truth_probabilities=self._epoch_probs.ground_truth_probabilities[
-                    :, None
-                ],
-                predicted_label_probabilities=self._epoch_probs.predicted_label_probabilities[
-                    :, None
-                ],
-            )
+        if self.label_probs is None:
+            self.label_probs = self._epoch_label_probs[:, None]
         else:
-            self.probs.ground_truth_probabilities = np.hstack(
+            self.label_probs = np.hstack(
                 (
-                    self.probs.ground_truth_probabilities,
-                    self._epoch_probs.ground_truth_probabilities[:, None],
-                )
-            )
-            self.probs.predicted_label_probabilities = np.hstack(
-                (
-                    self.probs.predicted_label_probabilities,
-                    self._epoch_probs.predicted_label_probabilities[:, None],
+                    self.label_probs,
+                    self._epoch_label_probs[:, None],
                 )
             )
 
-    def _convert_to_numpy(self, x: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
-        """Convert a torch tensor to a numpy array.
-
-        Args:
-            x (Union[np.ndarray, torch.Tensor]): Array to be converted.
+    def get_all_metrics(self) -> dict:
+        """Calculate all metrics and return them in a dictionary.
 
         Returns:
-            np.ndarray: Converted array.
+            dict: Dictionary of metrics.
         """
-        return x.detach().numpy() if isinstance(x, torch.Tensor) else x
-
-    def aleatoric_uncertainty(self) -> np.ndarray:
-        """Compute the aleatoric uncertainty of the ground truth label
-        probability across epochs
-
-        Returns:
-            np.ndarray: Aleatoric uncertainty. np.ndarray of shape (n_samples,)
-        """
-        preds = self.probs.ground_truth_probabilities
-        return np.mean(preds * (1 - preds), axis=1)
+        if self.label_probs is None:
+            raise ValueError("No label probabilities have been added.")
+        return {
+            metric_name: metric_fun(self.label_probs)
+            for metric_name, metric_fun in METRICS.items()
+        }

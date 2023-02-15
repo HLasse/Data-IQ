@@ -23,7 +23,7 @@ class TrainData(Dataset):
         self.y_data = y_data
 
     def __getitem__(self, index):
-        return self.X_data[index], self.y_data[index]
+        return self.X_data[index], self.y_data[index], index
 
     def __len__(self):
         return len(self.X_data)
@@ -80,7 +80,7 @@ def test_torch_example() -> None:
     net = Example_NN(input_size=X_train.shape[1], nlabels=len(np.unique(y_train)))
     net.to(device)
 
-    train_loader = DataLoader(dataset=train_data, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader = DataLoader(dataset=train_data, batch_size=BATCH_SIZE, shuffle=False)
     sf = nn.LogSoftmax()
     criterion = torch.nn.NLLLoss()
     optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
@@ -93,7 +93,7 @@ def test_torch_example() -> None:
         epoch_loss = 0
         epoch_acc = 0
 
-        for X_batch, y_batch in train_loader:
+        for X_batch, y_batch, batch_indices in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
 
             optimizer.zero_grad()
@@ -117,12 +117,15 @@ def test_torch_example() -> None:
             f"Epoch {e+0:03}: | Loss: {epoch_loss/len(train_loader):.5f} | Acc: {epoch_acc/len(train_loader):.3f}",
         )
 
-        dataiq.on_epoch_end(net, device=device)
+        # dataiq.on_epoch_end(net, device=device)
 
-    aleatoric_uncertainty = dataiq.aleatoric
-    confidence = dataiq.confidence
+    # aleatoric_uncertainty = dataiq.aleatoric
+    # teconfidence = dataiq.confidence
 
-    aleatoric_uncertainty_new = dataiq_new.aleatoric_uncertainty()
+    aleatoric_uncertainty_new = dataiq_new.aleatoric_uncertainty
+    confidence_new = dataiq_new.average_confidence
+    entropy = dataiq_new.entropy
+    all_metrics = dataiq_new.get_all_metrics()
 
     assert len(aleatoric_uncertainty) == len(X_train)
     assert len(confidence) == len(X_train)
@@ -130,3 +133,4 @@ def test_torch_example() -> None:
 
 if __name__ == "__main__":
     test_torch_example()
+

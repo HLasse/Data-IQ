@@ -100,7 +100,6 @@ class DataIQ_Torch:
         net.eval()
         with torch.no_grad():
             # iterate through the dataset
-            # TODO: remove the for loop and use torch tensors
             for i in range(len(self.X)):
 
                 # set as torch tensors
