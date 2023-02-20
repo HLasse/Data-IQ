@@ -10,6 +10,7 @@ import xgboost as xgb
 
 # data_iq absolute
 from data_iq.dataiq_class import DataIQ_SKLearn
+from data_iq.dataiq_gradient_boosting import DataIQGradientBoosting
 
 X_train, X_test, y_train, y_test, X, y = load_adult_data(split_size=0.3)
 
@@ -24,6 +25,9 @@ def eval_helper(model, nest: int = 10, **kwargs):
 
     aleatoric_uncertainty = dataiq.aleatoric
     confidence = dataiq.confidence
+
+    dataiq_new = DataIQGradientBoosting()
+    dataiq_new.evaluate_gradient_boosting(model=model, X=X_train, y=y_train)
 
     assert len(X_train) == len(confidence)
     assert len(X_train) == len(aleatoric_uncertainty)
@@ -52,3 +56,8 @@ def test_catboost_example() -> None:
 
     clf = CatBoostClassifier(n_estimators=nest)
     eval_helper(clf, nest=nest, catboost=True)
+
+
+if __name__ == "__main__":
+    test_xgboost_example()
+    test_catboost_example()

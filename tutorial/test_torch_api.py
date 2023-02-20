@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 
 # data_iq absolute
 from data_iq.dataiq_class import DataIQ_Torch
-from data_iq.dataiq_torch import DataIQTorch
+from data_iq.dataiq_batch import DataIQBatch
 
 
 class TrainData(Dataset):
@@ -86,7 +86,7 @@ def test_torch_example() -> None:
     optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
     dataiq = DataIQ_Torch(X=X_train, y=y_train, sparse_labels=True)
-    dataiq_new = DataIQTorch(n_samples=len(train_loader.dataset))
+    dataiq_new = DataIQBatch(n_samples=len(train_loader.dataset))
 
     for e in range(1, EPOCHS + 1):
         net.train()
@@ -133,4 +133,3 @@ def test_torch_example() -> None:
 
 if __name__ == "__main__":
     test_torch_example()
-

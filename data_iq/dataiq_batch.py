@@ -1,5 +1,5 @@
 # stdlib
-from typing import Union
+from typing import Optional, Union
 
 # third party
 import numpy as np
@@ -7,18 +7,16 @@ import torch
 
 # data_iq absolute
 from data_iq.metrics import METRICS, set_metrics_as_properties
-from data_iq.numpy_helpers import convert_to_numpy, get_ground_truth_probs, onehot2int
-
-"""
-TODO:
-- Add support for shuffled data
-    This can be done by having the dataset return the index of the sample
-    and passing this to class. The insertion of the probabilities then needs
-    to be done using the index (make sure to return from dataloader).
-"""
+from data_iq.numpy_helpers import (
+    add_values_by_indices,
+    add_values_sequentially,
+    convert_to_numpy,
+    get_ground_truth_probs,
+    onehot2int,
+)
 
 
-class DataIQTorch:
+class DataIQBatch:
     """Class for calculating the aleatoric uncertainty for models outputting
     probabilities over epochs.
 
@@ -40,14 +38,15 @@ class DataIQTorch:
 
     @classmethod
     def _set_metrics_as_properties(cls) -> None:
-        """Set the metrics as properties of the class. This allows the metrics
-        to be accessed as attributes of the class."""
+        """Set the metrics in dataiq.metrics.py as properties of the class.
+        This allows them to be easily accessed using cls.metric_name."""
         set_metrics_as_properties(cls, label_probs_name="label_probs")
 
     def on_batch_end(
         self,
         y_true: Union[np.ndarray, torch.Tensor],
         y_pred: Union[np.ndarray, torch.Tensor],
+        indices: Optional[Union[np.ndarray, torch.Tensor]],
     ) -> None:
         """Add the probabilities of the ground truth label for each sample.
         For each batch in an epoch, the probabilities are added to the
@@ -73,9 +72,19 @@ class DataIQTorch:
 
         # add the probabilities to the _epoch_label_probs attribute for the
         # current batch
-        self._epoch_label_probs[
-            self._current_sample_idx : self._current_sample_idx + batch_size
-        ] = ground_truth_probs
+        if indices is None:
+            self._epoch_label_probs = add_values_by_indices(
+                array=self._epoch_label_probs,
+                values=ground_truth_probs,
+                indices=indices,
+            )
+        else:
+            self._epoch_label_probs = add_values_sequentially(
+                array=self._epoch_label_probs,
+                values=ground_truth_probs,
+                batch_size=batch_size,
+                sample_index=self._current_sample_idx,
+            )
 
         # update the current sample index
         self._current_sample_idx += batch_size

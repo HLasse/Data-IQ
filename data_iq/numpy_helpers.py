@@ -1,5 +1,5 @@
 # stdlib
-from typing import Union
+from typing import Optional, Union
 
 # third party
 import numpy as np
@@ -51,3 +51,31 @@ def convert_to_numpy(x: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
         np.ndarray: Converted array.
     """
     return x.detach().numpy() if isinstance(x, torch.Tensor) else x
+
+
+def add_values_to_array(
+    array: np.ndarray,
+    values: np.array,
+    indices: Optional[np.ndarray],
+    sample_index: Optional[np.ndarray],
+    batch_size: int,
+) -> np.ndarray:
+    if indices is None:
+        return add_values_sequentially(
+            array=array, values=values, batch_size=batch_size, sample_index=sample_index
+        )
+    return add_values_by_indices(array=array, values=values, indices=indices)
+
+
+def add_values_sequentially(
+    array: np.ndarray, values: np.ndarray, batch_size: int, sample_index: int
+) -> np.ndarray:
+    array[sample_index : sample_index + batch_size] = values
+    return array
+
+
+def add_values_by_indices(
+    array: np.ndarray, values: np.ndarray, indices: np.ndarray
+) -> np.ndarray:
+    array[indices] = values
+    return array
